@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="en">
+
+	<head>
+		<meta charset="utf-8">
+
+		<title>Event Sourcing with Play</title>
+
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<link rel="stylesheet" href="css/reveal.min.css">
+		<link rel="stylesheet" href="css/theme/beige.css" id="theme">
+
+		<!-- For syntax highlighting -->
+		<link rel="stylesheet" href="lib/css/zenburn.css">
+
+		<!-- If the query includes 'print-pdf', include the PDF print sheet -->
+		<script>
+			if( window.location.search.match( /print-pdf/gi ) ) {
+				var link = document.createElement( 'link' );
+				link.rel = 'stylesheet';
+				link.type = 'text/css';
+				link.href = 'css/print/pdf.css';
+				document.getElementsByTagName( 'head' )[0].appendChild( link );
+			}
+		</script>
+
+		<!--[if lt IE 9]>
+		<script src="lib/js/html5shiv.js"></script>
+		<![endif]-->
+	</head>
+
+	<body>
+
+		<div class="reveal">
+
+			<!-- Any section element inside of this container is displayed as a slide -->
+			<div class="slides">
+				<section>
+					<h1>Event Sourcing</h1>
+					<h3>with Akka and Play</h3>
+					<p>
+						<small>Michael Schleichardt <br><a href="https://github.com/schleichardt">https://github.com/schleichardt</a></small>
+					</p>
+				</section>
+
+                <!--
+                My master's theses was about AP, ACS and macros to improve event sourcing
+                I used Scala.
+                The slide code will be in Java, the demo in Scala.
+
+                verständnisfragen gleich, philosophical questions later
+                very complex topics with a lot of details
+                -->
+
+                <section>
+                    <h2>Table of Contents</h2>
+                    <ul>
+                        <li>Java API for Concurrency</li>
+                        <li>Akka</li>
+                        <li>Actor Model</li>
+                        <li>Event Sourcing</li>
+                        <li>Akka Persistence</li>
+                        <li>Akka Cluster Sharding</li>
+                        <li>Code Example</li>
+                    </ul>
+                </section>
+                <section>
+                    <h1>Java API for Concurrency</h1>
+                </section>
+                <section>
+                    <h2>Toolbox</h2>
+                    <ul>
+                        <li>synchronized</li>
+                        <li>ReentrantLock</li>
+                        <li>AtomicInteger</li>
+                        <li>ExecutorService</li>
+                        <li>callbacks</li>
+                        <li>java.util.concurrent.Future</li>
+                        <li>...</li>
+                    </ul>
+                </section>
+                <section>
+                    <h2>Exceptions</h2>
+                        <p>You create threads to parallelize work. </p>
+
+                    <p>How does a created thread report an exception to the caller?</p>
+                </section>
+                <section>
+                    <h2>Locks</h2>
+                        <p>If a lock is frequently hit, frequently computing time is wasted to suspend, check and resume the threads.
+                            </p><br><p> Wouldn't it be more useful for Threads to do something useful for the application instead of being suspended?</p>
+                </section>
+                <section>
+                    <h2>Scalability</h2>
+                        <p>Imagine, you did it right, no deadlocks, performant code, readability.</p><br><p>
+                            Can you scale out?</p>
+                </section>
+
+                <section>
+                    <h1>Akka</h1>
+                </section>
+                <section>
+                    <h2>Akka</h2>
+                    <ul>
+                        <li>toolkit for concurrent applications</li>
+                        <li>API for Java and Scala</li>
+                        <li>Play 2 is built on top of it<ul><li>Play 2.2 uses Akka 2.2</li><li>Play 2.3 uses Akka 2.3</li></ul></li>
+                        <li>uses Actor Model</li>
+                        <li>location transparent code for working on multiple machines up to a cluster</li>
+                    </ul>
+                    </section>
+                <section>
+                    <h1>Actor Model</h1>
+                </section>
+                <section>
+                    <h2>Actor Model Basics</h2>
+                    <ul>
+                        <li>mathematical model of concurrent computation</li>
+                        <li>there are actors and messages</li>
+                        <li>actors can contain state, but state is never exposed directly</li>
+                        <li>actor has messages in a mailbox (by default in-memory)</li>
+                        <li>actors are decoupled from each other, from outside they look all alike</li>
+                        <li>man in the middle is a feature, a makes them testable</li>
+                    </ul>
+                </section>
+                <section>
+                    <h2>Actor Model Messages</h2>
+                    <ul>
+                        <li>you can only talk with actors via (immutable) messages</li>
+                        <li>message processing is asynchronous</li>
+                        <li>one actor processes one message at a time, so no explicit locking is necessary</li>
+                        <li>do not wait or block, use async tools that produce messages</li>
+                        <li>use a scheduler to send messages in the future</li>
+
+                    </ul>
+                    </section>
+                <section>
+                    <h2>Actor Model</h2>
+                    <ul>
+                        <li>is not deterministic, message order undefined, (transparent) processing in parallel possible via multiple actors</li>
+                        <li>model not deterministic => tests can be not deterministic</li>
+                        <li>harder to create deadlocks</li>
+                        <li>maintaining the mailbox can cause a lot of CPU overhead</li>
+                        <li>lmax disruptor or just Scala Futures can be alternatives</li>
+                    </ul>
+                    </section>
+                <section>
+                    <h1>Back to Akka</h1>
+                </section>
+                <section><h2></h2>
+<pre><code contenteditable>ActorSystem system = ActorSystem.create("Bank");
+ActorRef account = system.actorOf(
+    Props.create(BankAccountActor.class), "account");
+ActorRef customer = system.actorOf(Props.create(CustomerActor.class), "you");
+account.tell(new Deposit(5000), customer);
+account.tell(new Withdraw(3000), customer);
+account.tell(new Withdraw(3000), customer);
+//no blocking, here may 0 to 3 messages processed by the BankAccountActor
+</code></pre>
+                </section>
+                <section>
+<pre><code contenteditable data-trim> public class BankAccountActor extends UntypedActor {
+        private final BankAccount account = new BankAccount();
+
+        //never use blocking code here, like waiting for future results
+        public void onReceive(Object message) throws Exception {
+            if (message instanceof Deposit) {
+                account.deposit(((Deposit) message).centAmount());
+                sender().tell(new Ack(), self());
+            } else if (message instanceof Withdraw) {
+                final long centAmount = ((Deposit) message).centAmount();
+                if (centAmount <= account.getBalanceInCents()) {
+                    account.withdraw(centAmount);
+                    sender().tell(new Ack(), self());
+                } else
+                    sender().tell(new IllegalArgumentException(
+                                        "Insufficient balance"), self());
+</code></pre></section>
+
+
+                <section>
+                    <h2>Before Event Sourcing</h2>
+                    <ul>
+                        <li>CRUD</li>
+                        <li>Database contains full model state and is single source of truth</li>
+                        <li>newState = f(proposedState) = proposedState</li>
+                        <li>locking necessary for object over writes</li>
+                        <li>ORM, Ebean &amp; Hibernate =&gt;object/relational impedence, but data should be in the focus, not code</li>
+                        <li>Changes on the model class need database migrations, tough</li>
+                        <li>previous states not available</li>
+                    </ul>
+                </section>
+                <section>
+                    <p>A higher throughput, please.</p>
+                    <p>Wouldn't it be great to see not only the current state but previous states and how their are achieved?</p>
+                </section>
+                <section>
+                    <h1>Event Sourcing</h1>
+                </section>
+                <section>
+                    <h2>Event Sourcing Basics</h2>
+                    <ul>
+                        <li>we don't save the application state directly but the sequence of events that created the state</li>
+                        <li>Events are records of the past, they can't be changed, even cancellation of an order is just a new event<ul>
+                            Examples for events:
+                            <li>cart created, item added to cart, item removed from cart, order cart, order payed, order return, order refund</li>
+                        </ul></li>
+                        <li>events != commands, command is request to do something, for example an order cart command can fail if no shipping address is provided,
+                        an order cart event is the record of the successful order creation
+                        </li>
+                        <li>our source of truth does not contain the result but the road to it</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h2>Event Sourcing is functional</h2>
+                    <ul>
+                        <li>newState = f(previousState, event)</li>
+                        <li>currentBalance = previousBalance + depositAmount</li>
+                        <li>state3 = f(f(f(f(initialState, ev0), ev1), ev2), ev3)</li>
+                        <li>aah, a fold left:<ul><li>val eventList = List(ev0, ev1, ev2, ev3)</li><li>val currentState = eventList.foldLeft(initialState)(f)</li></ul> </li>
+                        <li>in my programs the initial state is the first event that is recorded</li>
+                        <li>my flavor: events recorded per entity</li>
+                    </ul>
+                </section>
+                <section>
+                    <h2>Event Sourcing Vocabulary</h2>
+                    <ul>
+                        <li>Memory Model/MemoryImage: representation of current state as object in RAM</li>
+                        <li>Complete Rebuild: may drop memory model and rerun all events for the entity</li>
+                        <li>Temporal Query: retrieve previous state<ul>
+                            <li>current: state3 = f(f(f(f(initialState, ev0), ev1), ev2), ev3)</li>
+                            <li>previous: state2 = f(f(f(initialState, ev0), ev1), ev2)</li>
+                        </ul></li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h2>(Binary) Snapshots</h2>
+                    <ul>
+                        <li>without snapshot<ul><li>val eventList = List(ev0, ev1, ev2, ev3, ev4, ..., ev100)</li><li>eventList.size == 101</li><li>val currentState = eventList.foldLeft(initialState)(f)</li></ul></li>
+                        <li>with snapshot<ul><li>val eventList = List(ev90, ev91, ev92, ev93, ev94, ..., ev100)</li><li>eventList.size == 11</li><li>val currentState = eventList.foldLeft(state90)(f)</li></ul></li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h2>(Queryable/Searchable) Snapshots</h2>
+                    <ul>
+                        <li>the event based nature of the write model is not suitable to search the current state<ul><li>
+                            e.g., search orders for one customer
+                        </li></ul></li>
+                        <li>so events should be used to fill a (document-oriented) database like MongoDB or ElasticSearch</li>
+                        <li>the separation of the models you read from and you write to is called CQRS http://martinfowler.com/bliki/CQRS.html</li>
+                    </ul>
+                </section>
+                <section>
+                    <h2>Event Sourcing</h2>
+                    <ul>
+                        <li>you store all the events, binary snapshots and queryable snapshots =&gt; more disc space is needed</li>
+                        <li>events are immutable and you just append the to a store =&gt; less locking in write model, higher throughput possible</li>
+                        <li>even if you avoid DELETE in CRUD SQL, UPDATE command can also delete data, in ES the data is still available</li>
+                    </ul>
+                </section>
+                <section>
+                    <h2>Event Sourcing</h2>
+                    <ul>
+                        <li>Error in production? Crappy logging? But you stored events? You will love it!</li>
+                        <li>higher cognitive load to work with ES</li>
+                        <li>eventual consistency: CRUD: single source of truth, ES: write model up date, views &amp; snapshots take additional time to update, but if you wait long enough (and don't change sth.) it will be consistent </li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h2>Command Sourcing</h2>
+                    <ul>
+                        <li>Saves state by commands instead of events, which may fail</li>
+                        <li>Fowler describes a mixture of ES and Command Sourcing on http://martinfowler.com/eaaDev/EventSourcing.html</li>
+                        <li>external interaction needs gateways<ul>
+                            <li>or commands are exectuted multiple times, e.g., payments</li>
+                            <li>queries may respond differently, e.g., exchange rates for currencies</li>
+                        </ul></li>
+                        <li>better for deeper analytics what failed</li>
+                        <li>commands maybe corrected in which order they happen</li>
+                    </ul>
+                </section>
+                <section>
+                    <h1>Akka Persistence</h1>
+                </section>
+                <section>
+                    <h2>ES to Akka Persistence</h2>
+                    <ul>
+                        <li>Events are immutable messages</li>
+                        <li>state is internal and can change at any time, can be dropped</li>
+                        <li>newState = f(previousState, event) is side effect free and functions are in the foreground</li>
+                        <li>that sounds like functional programming and actors</li>
+                        <li>Akka with Scala or Akka with Java 8 seem to be a good fit to implement Event Sourcing</li>
+                        <li>One tool to implement ES can be the Akka Persistence module</li>
+                    </ul>
+                </section>
+
+
+                <section>
+                    <h2>Akka Persistence</h2>
+                    <ul>
+                        <li>for Java and Scala</li>
+                        <li>since Akka 2.3, so not by default compatible with Play 2.2 but with Play 2.3</li>
+                        <li>enables stateful actors by persisting messages and optional binary snapshots in an append only way</li>
+                        <li>it also provides channels to provide at-least-once message delivery semantics<ul>
+                            <li>If you don't acknowledge messages, they will be sent again</li>
+                        </ul></li>
+                        <li>Eligotech developed the Akka extension eventsourced</li>
+                        <li>Typesafe and Eligotech partnered to create Akka Persistence and used the ideas from eventsourced</li>
+                        <li>experimental =&gt; no guarantees module is binary or source compatible with the next version</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h2>Key concepts: Journal</h2>
+                    <ul>
+                        <li>persistent store of persistent messages</li>
+                        <li>operations: append, read, delete</li>
+                        <li>different plugins for databases </li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h2>Persistence in Akka Persistence</h2>
+                    <ul>
+                        <li>2 kinds of storage: journal for events, snapshot store for binary snapshots</li>
+                        <li>different plugins available (most of them only for journals)<ul>
+                            <li>LevelDB (local)</li>
+                            <li>Cassandra (async driver)</li>
+                            <li>DynamoDB</li>
+                            <li>HBase</li>
+                            <li>MapDB</li>
+                            <li>MongoDB (via Casbah, a sync driver)</li>
+                        </ul></li>
+                    </ul>
+                </section>
+
+<section>
+
+    <p>For dev, test and prod you can use different databases by changing values in Typesafe Config/Play Configuration</p>
+    <pre><code contenteditable data-trim>#application.conf
+akka.persistence.journal.plugin = "akka-contrib-mongodb-persistence-journal"
+
+akka.contrib.persistence.mongodb.mongo.urls =
+    ["192.168.0.1:27017","192.168.0.2:27017"]
+akka.contrib.persistence.mongodb.mongo.journal-write-concern =
+    "Acknowledged"
+</code></pre>
+    <pre><code contenteditable data-trim>#reference.conf in MongoDB plugin
+akka-contrib-mongodb-persistence-journal.
+        class = "akka.contrib.persistence.mongodb.MongoJournal"
+</code></pre>
+
+</section>
+
+
+                <section>
+                    <h2>Key concepts: EventsourcedProcessor</h2>
+                    <ul>
+                        <li>receives non persistent commands, validates them, generates events and persists them and after that, it applies it to the internal state<ul>
+                            <li>be careful to not persist events that cause exceptions, but you can delete these events</li>
+                        </ul></li>
+                        <li>not every message needs to be persisted</li>
+                        <li>stateful actor, contains the memory model and f</li>
+                        <li>has a processorId, String as ID, should be stable, override it!</li>
+                        <li>if reinstantiated, automatically receives the events to replay</li>
+                    </ul>
+                </section>
+
+
+
+
+
+                <section><pre><code contenteditable data-trim>//actually it is a Scala class
+abstract class UntypedEventsourcedProcessor {
+    //[...]
+
+    //the "new" name for onReceive
+    public abstract void onReceiveCommand(Object message);
+
+    //the "new" name for onReceive at the complete rebuild
+    public abstract void onReceiveRecover(Object message);
+}
+</code></pre></section>
+
+<section><pre><code contenteditable data-trim>
+@Override public void onReceiveCommand(Object message) {
+if (message instanceof DepositCommand) //[...]
+else if (message instanceof WithdrawCommand) {
+    final long centAmount = ((DepositCommand) message).getCentAmount();
+    if (centAmount <= account.getBalanceInCents()) {
+        final ActorRef sender = sender();
+        persist(new WithdrawEvent(centAmount), new Procedure&lt;WithdrawEvent&gt;() {
+            @Override
+            public void apply(WithdrawEvent event) throws Exception {
+                updateState(event);
+                sender.tell(new Ack(), self());
+            }
+        });
+    } else sender().tell(new IllegalArgumentException("No sufficient balance"), self());
+} else if (message.equals("snap")) saveSnapshot(account.copy());
+</code></pre></section>
+
+<section><pre><code contenteditable data-trim>
+@Override
+public void onReceiveRecover(Object message) {
+    if (message instanceof SnapshotOffer)//binary snapshot
+        account = (BankAccount)((SnapshotOffer)message).snapshot();
+    else
+        updateState(message);
+}
+
+private BankAccount account = new BankAccount();
+
+private void updateState(Object event) {
+    if (event instanceof DepositEvent) {
+        account.deposit(((DepositEvent)event).getCentAmount());
+    } else if (event instanceof WithdrawEvent) {
+        account.withdraw(((WithdrawEvent)event).getCentAmount());
+    }
+}
+</code></pre></section>
+
+
+<section><p>What is the difference between this and the previous slide?</p><pre><code contenteditable data-trim>
+@Override
+public void onReceiveRecover(Object message) {
+    if (message instanceof SnapshotOffer)
+        amount = (Integer)((SnapshotOffer)message).snapshot();
+    else
+        updateState(message);
+}
+
+private int amount = 0;
+
+private void updateState(Object event) {
+    if (event instanceof DepositEvent) {
+        amount += ((DepositEvent)event).getCentAmount();
+    } else if (event instanceof WithdrawEvent) {
+        amount -= ((WithdrawEvent)event).getCentAmount();
+    }
+}
+</code></pre></section>
+
+<section>
+    <p>In Event Sourcing it is hard to change events, but easy to change the in-memory model.</p>
+</section>
+                <section>
+                    <h2>Key concepts: View</h2>
+                    <ul>
+                        <li>mirrors the state of another persistent actor</li>
+                        <li>read only</li>
+                        <li>useful to extract the events, for example if a new database representation should be created</li>
+                        <li>useful for temporal queries</li>
+                        <li>can be automatically updated if new events arrive the processor =&gt; very useful to provide feed to browser via Server-Sent Events or WebSockets</li>
+                    </ul>
+                </section>
+                <!--
+example temporal query
+-->
+<section><pre><code contenteditable data-trim>
+class PastView extends UntypedView {
+    @Override
+    public String processorId() {
+        return "some-processor-id";
+    }
+
+    @Override
+    public void onReceive(Object message) throws Exception {
+        if (message instanceof Persistent) {
+        // set state, persistent message contains event as payload
+        }
+    }
+
+    //since nethod returns 5 it only replays to events sequence number 5
+    @Override
+    public long autoUpdateReplayMax(){
+        return 5;//TODO as constructor parameter
+    }
+</code></pre></section>
+
+
+                <!--
+                the persistence plugins can be async or sync, cassandra is async, MongoDB sync concerning reactive applications
+                do not reuse plays actor system to make testing and configuration easier
+
+                -->
+
+                <section>
+                   <p>And how do I do it on multiple servers for HA and updates?</p>
+                </section>
+
+                <section>
+                    <p>The sequence number of the persisted events is generated inside the EventSourcedProcessor, not in the database (see Persistence.scala in Akka code base).</p>
+                    <p>So in one cluster one Processor can only exist once.</p>
+                    <p>With Akka Cluster Singleton you can deploy it on one machine, but they all need to fit into the RAM.</p>
+                </section>
+
+                <section>
+                    <p>So what do I do if the they won't fit all in the RAM?</p>
+                </section>
+
+                <section>
+                    <h1>Akka Cluster Sharding</h1>
+                </section>
+
+                <section>
+                    <h2>Akka Cluster Sharding</h2>
+                    <ul>
+                    <li>distribute actors ("entries") across several nodes in the cluster</li>
+                    <li>messaging with entries is location transparent, but you need to give hints</li>
+                    <li>automatic distribution</li>
+                    <li>automatic rebalacing, be careful about stateful actors which do not use event sourcing</li>
+                    <li>contrib module</li>
+                    </ul>
+                </section>
+
+
+
+<section><pre><code contenteditable data-trim>//setup
+ClusterSharding.get(system).start("accounts",
+    Props.create(BankAccountActor.class), messageExtractor);
+
+public interface MessageExtractor {
+    String entryId(Object message);//bankAccountId
+    Object entryMessage(Object message);//payload, new DepositCommand(500)
+    String shardId(Object message);//bankAccount.getId().hashCode % 5013
+};
+
+//send message
+ActorRef region = ClusterSharding.get(system).shardRegion("accounts");
+region.tell(new Evelope("bankAccountId", new DepositCommand(500)), getSelf());
+</code></pre></section>
+
+
+
+                <section><h2>PubSub in Cluster</h2><p>from http://doc.akka.io/docs/akka/2.3.2/contrib/distributed-pub-sub.html</p><pre><code contenteditable data-trim>public class Publisher extends UntypedActor {
+
+  // activate the extension
+  ActorRef mediator =
+    DistributedPubSubExtension.get(getContext().system()).mediator();
+
+  public void onReceive(Object msg) {
+    if (msg instanceof String) {
+      String in = (String) msg;
+      String out = in.toUpperCase();
+      String topic = "content";
+      mediator.tell(new DistributedPubSubMediator.Publish(topic, out),
+        getSelf());
+    } else {
+      unhandled(msg);
+    }
+  }
+}</code></pre></section>
+                <section><h2>PubSub in Cluster</h2><p>from http://doc.akka.io/docs/akka/2.3.2/contrib/distributed-pub-sub.html</p><pre><code contenteditable data-trim>public class Subscriber extends UntypedActor {
+  LoggingAdapter log = Logging.getLogger(getContext().system(), this);
+
+  public Subscriber() {
+    ActorRef mediator =
+      DistributedPubSubExtension.get(getContext().system()).mediator();
+    // subscribe to the topic named "content"
+    mediator.tell(new DistributedPubSubMediator.Subscribe("content", getSelf()),
+      getSelf());
+  }
+
+  public void onReceive(Object msg) {
+    if (msg instanceof String)
+      log.info("Got: {}", msg);
+    else if (msg instanceof DistributedPubSubMediator.SubscribeAck)
+      log.info("subscribing");
+    else
+      unhandled(msg);
+  }
+}</code></pre></section>
+
+                <section><p>use WebSockets to publish events to the browser</p></section>
+
+<section><h2>Actors for WebSockets</h2><p>http://www.playframework.com/documentation/2.3.x/JavaWebSockets</p><pre><code contenteditable data-trim>import akka.actor.*;
+
+public class MyWebSocketActor extends UntypedActor {
+
+    public static Props props(ActorRef out) {
+        return Props.create(MyWebSocketActor.class, out);
+    }
+
+    private final ActorRef out;
+
+    public MyWebSocketActor(ActorRef out) {
+        this.out = out;
+    }
+
+    public void onReceive(Object message) throws Exception {
+        if (message instanceof String) {
+            out.tell("I received your message: " + message, self());
+        }
+    }
+}</code></pre></section>
+
+
+                <section><p>use Server-Sent Events to publish events to the browser</p></section>
+
+<section><h2>Server-Sent Events</h2><pre><code contenteditable data-trim>def onStart(channel: PlayChannel[JsValue]) {
+        actorRef ! SubscriberActor.SetChannel(channel)
+      }
+      val enumerator: Enumerator[JsValue] = Concurrent.unicast(onStart,
+          actorRef ! PoisonPill, (_, _) => actorRef ! PoisonPill)
+      Ok.feed(enumerator &> EventSource()).as("text/event-stream")</code></pre>
+
+<pre><code contenteditable data-trim>class SubscriberActor(topic: String) extends Actor {
+    def ready(channel: PlayChannel[JsValue]): Actor.Receive = {
+        case e: Any => channel.push(JsString(e.toString))
+    }
+</code></pre></section>
+
+
+
+
+
+
+                <section>
+                    <h2>Akka Cluster</h2>
+                    <ul>
+                    <li>startup time may takes seconds, testing is time consuming</li>
+                    <li>deployment: please use correct host name, even mixed use of 127.0.0.1 and localhost may cause dead letters</li>
+                    <li>if you work with one node make sure it is a seed node or joins itself to form a cluster</li>
+                    <li>scaling up to 2400 nodes</li>
+                    <li>heartbeat messages, nothing happens, but still traffic</li>
+                        </ul>
+                </section>
+
+
+
+
+                <section>
+                    <p>I hope your next green field application is event sourced.</p>
+                </section>
+<!--
+                <section>
+                    <h2>Open Questions</h2>
+                    <ul>
+                        <li>Does Akka Cluster Sharding work with Heroku?</li>
+                        <li>How to migrate Events with new classes?</li>
+                        <li>How to deal with binary snapshots after the in-memory model changed?</li>
+                        <li>When are alternatives to Akka appropriate?</li>
+                    </ul>
+                </section>
+-->
+                <section>
+                    <h1>Demo</h1>
+                </section>
+			</div>
+
+		</div>
+
+		<script src="lib/js/head.min.js"></script>
+		<script src="js/reveal.min.js"></script>
+
+		<script>
+
+			// Full list of configuration options available here:
+			// https://github.com/hakimel/reveal.js#configuration
+			Reveal.initialize({
+				controls: true,
+				progress: true,
+				history: true,
+				center: true,
+				theme: Reveal.getQueryHash().theme, // available themes are in /css/theme
+				transition: Reveal.getQueryHash().transition || 'default', // default/cube/page/concave/zoom/linear/fade/none
+
+				// Parallax scrolling
+				// parallaxBackgroundImage: 'https://s3.amazonaws.com/hakim-static/reveal-js/reveal-parallax-1.jpg',
+				// parallaxBackgroundSize: '2100px 900px',
+
+				// Optional libraries used to extend on reveal.js
+				dependencies: [
+					{ src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
+					{ src: 'plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } },
+					{ src: 'plugin/zoom-js/zoom.js', async: true, condition: function() { return !!document.body.classList; } },
+					{ src: 'plugin/notes/notes.js', async: true, condition: function() { return !!document.body.classList; } }
+				]
+			});
+            Reveal.configure({ slideNumber: true });
+		</script>
+
+	</body>
+</html>
